@@ -45,6 +45,13 @@ type GiteaMergeFactsFixture = ForgeSpecificStatusFacts & {
   ciStatus: string | null;
 };
 
+type AzureDevOpsMergeFactsFixture = ForgeSpecificStatusFacts & {
+  forge: "azure-devops";
+  mergeStatus: string;
+  autoCompleteEnabled: boolean;
+  policiesStatus: "none" | "pending" | "success" | "failure";
+};
+
 function facts(overrides: Partial<GithubMergeFactsFixture> = {}): GithubMergeFactsFixture {
   return {
     forge: "github",
@@ -89,6 +96,18 @@ function giteaFacts(overrides: Partial<GiteaMergeFactsFixture> = {}): GiteaMerge
     mergeable: true,
     hasMerged: false,
     ciStatus: "success",
+    ...overrides,
+  };
+}
+
+function azureDevOpsFacts(
+  overrides: Partial<AzureDevOpsMergeFactsFixture> = {},
+): AzureDevOpsMergeFactsFixture {
+  return {
+    forge: "azure-devops",
+    mergeStatus: "succeeded",
+    autoCompleteEnabled: false,
+    policiesStatus: "success",
     ...overrides,
   };
 }
@@ -296,5 +315,47 @@ describe("deriveMergeCapability (gitea)", () => {
     expect(capability?.canEnableAutoMerge).toBe(false);
     expect(capability?.autoMergeEnabled).toBe(false);
     expect(capability?.canDisableAutoMerge).toBe(false);
+  });
+});
+
+describe("deriveMergeCapability (azure devops)", () => {
+  it("offers merge and squash while direct merge is ready", () => {
+    expect(deriveMergeCapability(azureDevOpsFacts())).toEqual({
+      directMergeReady: true,
+      canEnableAutoMerge: false,
+      autoMergeEnabled: false,
+      canDisableAutoMerge: false,
+      mergeBlockedByQueue: false,
+      allowedMethods: ["merge", "squash"],
+      preferredMethod: null,
+    });
+  });
+
+  it("requires succeeded merge status and satisfied policies for direct merge", () => {
+    expect(
+      deriveMergeCapability(azureDevOpsFacts({ mergeStatus: "queued" }))?.directMergeReady,
+    ).toBe(false);
+    expect(
+      deriveMergeCapability(azureDevOpsFacts({ policiesStatus: "pending" }))?.directMergeReady,
+    ).toBe(false);
+    expect(
+      deriveMergeCapability(azureDevOpsFacts({ policiesStatus: "pending" }))?.canEnableAutoMerge,
+    ).toBe(true);
+    expect(
+      deriveMergeCapability(azureDevOpsFacts({ policiesStatus: "failure" }))?.directMergeReady,
+    ).toBe(false);
+    expect(
+      deriveMergeCapability(azureDevOpsFacts({ policiesStatus: "none" }))?.directMergeReady,
+    ).toBe(true);
+  });
+
+  it("allows auto-complete only when it is not already enabled", () => {
+    const capability = deriveMergeCapability(
+      azureDevOpsFacts({ autoCompleteEnabled: true, policiesStatus: "pending" }),
+    );
+    expect(capability?.directMergeReady).toBe(false);
+    expect(capability?.canEnableAutoMerge).toBe(false);
+    expect(capability?.autoMergeEnabled).toBe(true);
+    expect(capability?.canDisableAutoMerge).toBe(true);
   });
 });

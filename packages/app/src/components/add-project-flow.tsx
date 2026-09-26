@@ -40,6 +40,8 @@ import {
   chooseAddProjectHost,
   currentAddProjectPage,
   moveAddProjectSelection,
+  openAzureDevOpsLocationPage,
+  openAzureDevOpsSearchPage,
   openAddProjectFlow,
   openDirectorySearchPage,
   openGithubLocationPage,
@@ -53,12 +55,14 @@ import {
   type AddProjectFlowState,
   type AddProjectHost,
   type AddProjectPage,
+  type ForgeRepositoryChoice,
   type GithubRepositoryChoice,
 } from "@/add-project-flow/model";
 import {
   buildAddProjectMethods,
   addProjectMethodEmptyText,
   buildCloneLocationOptions,
+  buildManualAzureDevOpsRepositoryChoices,
   buildManualGithubRepositoryChoices,
   buildSuggestedParentDirectories,
   filterAddProjectHosts,
@@ -78,7 +82,12 @@ import { pickDirectory } from "@/desktop/pick-directory";
 import { useFetchQuery } from "@/data/query";
 import { getOpenProjectFailureReason, registerProjectDescriptor } from "@/hooks/open-project";
 import { useIsLocalDaemon, useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
-import { useCloneGithubProject, useOpenProject } from "@/hooks/use-open-project";
+import {
+  useCloneGitProject,
+  useCloneGithubProject,
+  useOpenProject,
+} from "@/hooks/use-open-project";
+import { getForgeIconComponent } from "@/git/forge-icon";
 import {
   OverlayLayerProvider,
   useGlobalWebOverlayLayer,
@@ -113,6 +122,7 @@ interface FlowRowOption {
 }
 
 type GithubLocationPage = Extract<AddProjectPage, { kind: "github-location" }>;
+type AzureDevOpsLocationPage = Extract<AddProjectPage, { kind: "azure-devops-location" }>;
 
 interface FlowIconProps {
   icon: ComponentType<{ size?: number; color?: string }>;
@@ -163,6 +173,7 @@ function FlowBackButton({ onPress }: { onPress: () => void }) {
 
 function methodIcon(method: AddProjectMethodId): FlowRowOption["icon"] {
   if (method === "github") return Github;
+  if (method === "azure-devops") return getForgeIconComponent("azure-devops");
   if (method === "browse") return FolderOpen;
   if (method === "new-directory") return FolderPlus;
   return Search;
@@ -175,7 +186,9 @@ function directoryOptionSubtitle(option: ProjectPickerOption, shortPath: string)
 }
 
 function progressText(page: AddProjectPage): string {
-  if (page.kind === "github-location") return "Cloning project...";
+  if (page.kind === "github-location" || page.kind === "azure-devops-location") {
+    return "Cloning project...";
+  }
   if (page.kind === "new-directory-name") return "Creating directory...";
   return "Adding project...";
 }
@@ -183,6 +196,7 @@ function progressText(page: AddProjectPage): string {
 function emptyText(page: AddProjectPage, host: AddProjectHost | null): string {
   if (page.kind === "host") return "No connected hosts";
   if (page.kind === "github-search") return "Enter a GitHub URL or owner/repo";
+  if (page.kind === "azure-devops-search") return "Enter an Azure DevOps repository URL";
   if (page.kind === "method") return addProjectMethodEmptyText(host);
   return "No matching options";
 }
@@ -190,21 +204,29 @@ function emptyText(page: AddProjectPage, host: AddProjectHost | null): string {
 interface QueryErrorInput {
   searchesDirectories: boolean;
   directoryFailed: boolean;
-  githubFailed: boolean;
-  githubAvailable: boolean | null;
-  githubError: string | null;
+  repositoryLabel: string | null;
+  repositoryFailed: boolean;
+  repositoryAvailable: boolean | null;
+  repositoryError: string | null;
 }
 
 function queryErrorText(input: QueryErrorInput): string | null {
   if (input.searchesDirectories && input.directoryFailed) return "Unable to search directories";
-  if (input.githubFailed) return "Unable to search GitHub repositories";
-  if (input.githubError) return input.githubError;
-  if (input.githubAvailable === false) return input.githubError ?? "GitHub search is unavailable";
+  if (!input.repositoryLabel) return null;
+  if (input.repositoryFailed) return `Unable to search ${input.repositoryLabel} repositories`;
+  if (input.repositoryError) return input.repositoryError;
+  if (input.repositoryAvailable === false) return `${input.repositoryLabel} search is unavailable`;
   return null;
 }
 
 function pageHostId(page: AddProjectPage): string | null {
   return page.kind === "host" ? null : page.hostId;
+}
+
+function repositorySearchLabel(page: AddProjectPage): string | null {
+  if (page.kind === "github-search") return "GitHub";
+  if (page.kind === "azure-devops-search") return "Azure DevOps";
+  return null;
 }
 
 function pageTitle(page: AddProjectPage): string {
@@ -217,7 +239,10 @@ function pageTitle(page: AddProjectPage): string {
       return "Search for directory";
     case "github-search":
       return "Clone from GitHub";
+    case "azure-devops-search":
+      return "Clone from Azure DevOps";
     case "github-location":
+    case "azure-devops-location":
       return "Choose destination";
     case "new-directory-parent":
       return "Choose parent directory";
@@ -236,7 +261,10 @@ function pagePlaceholder(page: AddProjectInputPage): string {
       return "Search directories or enter a path...";
     case "github-search":
       return "Search or enter a GitHub repository...";
+    case "azure-devops-search":
+      return "Search or enter an Azure DevOps repository URL...";
     case "github-location":
+    case "azure-devops-location":
     case "new-directory-parent":
       return "Search parent directories or enter a path...";
     case "new-directory-name":
@@ -250,6 +278,66 @@ function pageInput(page: AddProjectInputPage): string {
 
 function pathTestId(path: string): string {
   return `add-project-flow-path-${encodeURIComponent(path)}`;
+}
+
+interface RepositoryRowsInput {
+  page: AddProjectPage;
+  githubRepositories: GithubRepositoryChoice[];
+  azureDevOpsRepositories: ForgeRepositoryChoice[];
+  selectGithub: (hostId: string, repository: GithubRepositoryChoice) => void;
+  selectAzureDevOps: (hostId: string, repository: ForgeRepositoryChoice) => void;
+}
+
+function buildRepositoryRows(input: RepositoryRowsInput): FlowRowOption[] | null {
+  if (input.page.kind === "github-search") {
+    const hostId = input.page.hostId;
+    const normalizedQuery = input.page.query.trim().toLowerCase();
+    const hasExactSearchResult = input.githubRepositories.some(
+      (repository) =>
+        repository.nameWithOwner.toLowerCase() === normalizedQuery ||
+        repository.cloneUrl.toLowerCase() === normalizedQuery,
+    );
+    const manualRepositories = hasExactSearchResult
+      ? []
+      : buildManualGithubRepositoryChoices(input.page.query);
+    return [...manualRepositories, ...input.githubRepositories].map((repository) => ({
+      id: repository.id,
+      title: repository.cloneProtocol
+        ? `${repository.nameWithOwner} via ${repository.cloneProtocol.toUpperCase()}`
+        : repository.nameWithOwner,
+      subtitle: repository.description,
+      icon: Github,
+      testID: `add-project-flow-repository-${repository.id}`,
+      select: () => input.selectGithub(hostId, repository),
+    }));
+  }
+  if (input.page.kind === "azure-devops-search") {
+    const hostId = input.page.hostId;
+    const normalizedQuery = input.page.query.trim().toLowerCase();
+    const hasExactSearchResult = input.azureDevOpsRepositories.some(
+      (repository) =>
+        repository.projectPath.toLowerCase() === normalizedQuery ||
+        repository.cloneUrl.toLowerCase() === normalizedQuery,
+    );
+    const manualRepositories = hasExactSearchResult
+      ? []
+      : buildManualAzureDevOpsRepositoryChoices(input.page.query);
+    return [...manualRepositories, ...input.azureDevOpsRepositories].map((repository) => ({
+      id: repository.id,
+      title: repository.projectPath,
+      subtitle: repository.description,
+      icon: getForgeIconComponent("azure-devops"),
+      testID: `add-project-flow-repository-${repository.id}`,
+      select: () => input.selectAzureDevOps(hostId, repository),
+    }));
+  }
+  return null;
+}
+
+function isCloneLocationPage(
+  page: AddProjectPage,
+): page is GithubLocationPage | AzureDevOpsLocationPage {
+  return page.kind === "github-location" || page.kind === "azure-devops-location";
 }
 
 function FlowRow({ option, active }: { option: FlowRowOption; active: boolean }) {
@@ -326,6 +414,8 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
   const githubCloneByHost = useHostFeatureMap(hostIds, "projectGithubClone");
   // COMPAT(workspaceGithubRepositorySearch): added in v0.1.108, remove gate after 2027-01-15.
   const githubSearchByHost = useHostFeatureMap(hostIds, "workspaceGithubRepositorySearch");
+  // COMPAT(projectForgeRepositories): added after v0.9.2, remove gate after 2027-03-26.
+  const forgeRepositoriesByHost = useHostFeatureMap(hostIds, "projectForgeRepositories");
   // COMPAT(projectCreateDirectory): added in v0.1.108, remove gate after 2027-01-15.
   const createDirectoryByHost = useHostFeatureMap(hostIds, "projectCreateDirectory");
   const localServerId = useLocalDaemonServerId();
@@ -344,6 +434,7 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
             canBrowse: canAddProject && getIsElectronRuntime() && localServerId === host.serverId,
             canCloneGithubRepositories: githubCloneByHost.get(host.serverId) === true,
             canSearchGithubRepositories: githubSearchByHost.get(host.serverId) === true,
+            canUseForgeRepositories: forgeRepositoriesByHost.get(host.serverId) === true,
             canCreateDirectory: createDirectoryByHost.get(host.serverId) === true,
           },
         ];
@@ -351,6 +442,7 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
     [
       connectionStatuses,
       createDirectoryByHost,
+      forgeRepositoriesByHost,
       githubCloneByHost,
       githubSearchByHost,
       hosts,
@@ -373,6 +465,7 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
   const recommendedPaths = useRecommendedProjectPaths(hostId);
   const openProject = useOpenProject(hostId);
   const cloneGithubProject = useCloneGithubProject(hostId);
+  const cloneGitProject = useCloneGitProject(hostId);
   const upsertProject = useCallback(
     (
       targetServerId: string,
@@ -387,6 +480,9 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
   const submissionInFlightRef = useRef(false);
   const browseInFlightRef = useRef(false);
   const query = page.kind === "new-directory-name" || page.kind === "method" ? "" : page.query;
+  const hasManualAzureDevOpsRemote =
+    page.kind === "azure-devops-search" &&
+    buildManualAzureDevOpsRepositoryChoices(page.query).length > 0;
   const pageInputValueRef = useRef(page.kind === "method" ? "" : pageInput(page));
   pageInputValueRef.current = page.kind === "method" ? "" : pageInput(page);
   const [debouncedQuery, setDebouncedQuery] = useState(query);
@@ -411,6 +507,7 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
   const searchesDirectories =
     page.kind === "directory-search" ||
     page.kind === "github-location" ||
+    page.kind === "azure-devops-location" ||
     page.kind === "new-directory-parent";
   const directoryQuery = useFetchQuery({
     queryKey: ["add-project-flow-directories", hostId, debouncedQuery],
@@ -442,6 +539,22 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
       return { query: debouncedQuery, payload };
     },
     enabled: Boolean(client && page.kind === "github-search" && host?.canSearchGithubRepositories),
+    dataShape: "value",
+    retry: false,
+    staleTimeMs: 15_000,
+  });
+  const azureDevOpsQuery = useFetchQuery({
+    queryKey: ["add-project-flow-azure-devops", hostId, debouncedQuery],
+    queryFn: async () => {
+      if (!client) throw new Error("Host is unavailable");
+      const payload = await client.searchForgeRepositories({
+        forge: "azure-devops",
+        query: debouncedQuery,
+        limit: 30,
+      });
+      return { query: debouncedQuery, payload };
+    },
+    enabled: Boolean(client && page.kind === "azure-devops-search" && !hasManualAzureDevOpsRemote),
     dataShape: "value",
     retry: false,
     staleTimeMs: 15_000,
@@ -528,6 +641,8 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
         void browse();
       } else if (method === "github") {
         setState((current) => openGithubSearchPage(current, hostId));
+      } else if (method === "azure-devops") {
+        setState((current) => openAzureDevOpsSearchPage(current, hostId));
       } else {
         setState((current) => openNewDirectoryParentPage(current, hostId));
       }
@@ -549,32 +664,35 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
     [directoryPaths, query, recommendedPaths],
   );
   const cloneRepository = useCallback(
-    async (locationPage: GithubLocationPage, parentPath: string) => {
+    async (locationPage: GithubLocationPage | AzureDevOpsLocationPage, parentPath: string) => {
       if (submissionInFlightRef.current) return;
       submissionInFlightRef.current = true;
       setState((current) =>
-        setPageStatus(current, "github-location", { isSubmitting: true, error: null }),
+        setPageStatus(current, locationPage.kind, { isSubmitting: true, error: null }),
       );
       try {
-        const result = await cloneGithubProject(
-          locationPage.repository.cloneUrl,
-          parentPath,
-          locationPage.repository.cloneProtocol,
-        );
+        const result =
+          locationPage.kind === "github-location"
+            ? await cloneGithubProject(
+                locationPage.repository.cloneUrl,
+                parentPath,
+                locationPage.repository.cloneProtocol,
+              )
+            : await cloneGitProject(locationPage.repository.cloneUrl, parentPath);
         if (result.ok) {
           lastCloneParentByHost.set(locationPage.hostId, parentPath);
           openNewWorkspaceForProject(locationPage.hostId, result.project);
           return;
         }
         setState((current) =>
-          setPageStatus(current, "github-location", {
+          setPageStatus(current, locationPage.kind, {
             isSubmitting: false,
             error: result.error ?? "Unable to clone repository",
           }),
         );
       } catch (error) {
         setState((current) =>
-          setPageStatus(current, "github-location", {
+          setPageStatus(current, locationPage.kind, {
             isSubmitting: false,
             error: error instanceof Error ? error.message : "Unable to clone repository",
           }),
@@ -583,7 +701,7 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
         submissionInFlightRef.current = false;
       }
     },
-    [cloneGithubProject, openNewWorkspaceForProject],
+    [cloneGitProject, cloneGithubProject, openNewWorkspaceForProject],
   );
   const rows = useMemo<FlowRowOption[]>(() => {
     if (page.kind === "host") {
@@ -637,33 +755,27 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
         };
       });
     }
-    if (page.kind === "github-search") {
-      const search = githubQuery.data?.query === page.query ? githubQuery.data.payload : null;
-      const repositories = search?.repositories ?? [];
-      const normalizedQuery = page.query.trim().toLowerCase();
-      const hasExactSearchResult = repositories.some(
-        (repository) =>
-          repository.nameWithOwner.toLowerCase() === normalizedQuery ||
-          repository.cloneUrl.toLowerCase() === normalizedQuery,
-      );
-      const manualRepositories = hasExactSearchResult
-        ? []
-        : buildManualGithubRepositoryChoices(page.query);
-      const repositoryChoices: GithubRepositoryChoice[] = [...manualRepositories, ...repositories];
-      return repositoryChoices.map((repository) => ({
-        id: repository.id,
-        title: repository.cloneProtocol
-          ? `${repository.nameWithOwner} via ${repository.cloneProtocol.toUpperCase()}`
-          : repository.nameWithOwner,
-        subtitle: repository.description,
-        icon: Github,
-        testID: `add-project-flow-repository-${repository.id}`,
-        select: () =>
-          setState((current) => openGithubLocationPage(current, page.hostId, repository)),
-      }));
-    }
-    if (page.kind === "github-location") {
-      const repositoryName = pathBaseName(page.repository.nameWithOwner);
+    const repositoryRows = buildRepositoryRows({
+      page,
+      githubRepositories:
+        page.kind === "github-search" && githubQuery.data?.query === page.query
+          ? githubQuery.data.payload.repositories
+          : [],
+      azureDevOpsRepositories:
+        page.kind === "azure-devops-search" && azureDevOpsQuery.data?.query === page.query
+          ? azureDevOpsQuery.data.payload.repositories
+          : [],
+      selectGithub: (repositoryHostId, repository) =>
+        setState((current) => openGithubLocationPage(current, repositoryHostId, repository)),
+      selectAzureDevOps: (repositoryHostId, repository) =>
+        setState((current) => openAzureDevOpsLocationPage(current, repositoryHostId, repository)),
+    });
+    if (repositoryRows) return repositoryRows;
+    if (isCloneLocationPage(page)) {
+      const repositoryName =
+        page.kind === "github-location"
+          ? pathBaseName(page.repository.nameWithOwner)
+          : page.repository.name;
       const lastParent = lastCloneParentByHost.get(page.hostId);
       const parents = buildSuggestedParentDirectories(recommendedPaths);
       const orderedParents = lastParent
@@ -703,6 +815,7 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
   }, [
     cloneRepository,
     directoryPaths,
+    azureDevOpsQuery.data,
     githubQuery.data,
     host,
     onClose,
@@ -829,17 +942,31 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
     page.kind === "github-search" && githubQuery.data?.query === page.query
       ? githubQuery.data.payload
       : null;
+  const currentAzureDevOpsSearch =
+    page.kind === "azure-devops-search" && azureDevOpsQuery.data?.query === page.query
+      ? azureDevOpsQuery.data.payload
+      : null;
+  const repositoryLabel = repositorySearchLabel(page);
+  const repositorySearch = currentGithubSearch ?? currentAzureDevOpsSearch;
   const loading =
     (searchesDirectories && (query !== debouncedQuery || directoryQuery.isFetching)) ||
     (page.kind === "github-search" &&
       host?.canSearchGithubRepositories === true &&
-      (query !== debouncedQuery || githubQuery.isFetching));
+      (query !== debouncedQuery || githubQuery.isFetching)) ||
+    (page.kind === "azure-devops-search" &&
+      !hasManualAzureDevOpsRemote &&
+      (query !== debouncedQuery || azureDevOpsQuery.isFetching));
   const queryError = queryErrorText({
     searchesDirectories,
     directoryFailed: directoryQuery.isError,
-    githubFailed: page.kind === "github-search" && githubQuery.isError,
-    githubAvailable: currentGithubSearch?.available ?? null,
-    githubError: currentGithubSearch?.error ?? null,
+    repositoryLabel,
+    repositoryFailed:
+      (page.kind === "github-search" && githubQuery.isError) ||
+      (page.kind === "azure-devops-search" &&
+        !hasManualAzureDevOpsRemote &&
+        azureDevOpsQuery.isError),
+    repositoryAvailable: repositorySearch?.available ?? null,
+    repositoryError: repositorySearch?.error ?? null,
   });
   const preview =
     page.kind === "new-directory-name" && page.name.trim()

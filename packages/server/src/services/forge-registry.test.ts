@@ -6,6 +6,7 @@ import { createGitHubService } from "./github-service.js";
 
 describe("forge registry", () => {
   it("builds the registered adapters", () => {
+    const azureDevOps = createForgeService("azure-devops");
     const github = createForgeService("github");
     const gitlab = createForgeService("gitlab");
     const gitea = createForgeService("gitea");
@@ -16,6 +17,7 @@ describe("forge registry", () => {
     expect(gitea?.getCurrentPullRequestStatus).toBeTypeOf("function");
     expect(forgejo?.getCurrentPullRequestStatus).toBeTypeOf("function");
     expect(codeberg?.getCurrentPullRequestStatus).toBeTypeOf("function");
+    expect(azureDevOps?.getCurrentPullRequestStatus).toBeTypeOf("function");
   });
 
   it("returns null for an unregistered forge", () => {
@@ -32,10 +34,20 @@ describe("forge registry", () => {
     expect(defaultForgeRegistry.has("gitea")).toBe(true);
     expect(defaultForgeRegistry.has("forgejo")).toBe(true);
     expect(defaultForgeRegistry.has("codeberg")).toBe(true);
+    expect(defaultForgeRegistry.has("azure-devops")).toBe(true);
     expect(defaultForgeRegistry.has("bitbucket")).toBe(false);
     expect(defaultForgeRegistry.ids()).toEqual(
-      expect.arrayContaining(["github", "gitlab", "gitea", "forgejo", "codeberg"]),
+      expect.arrayContaining(["github", "gitlab", "gitea", "forgejo", "codeberg", "azure-devops"]),
     );
+  });
+
+  it.each([
+    "dev.azure.com",
+    "ssh.dev.azure.com",
+    "vs-ssh.visualstudio.com",
+    "allshareebv.visualstudio.com",
+  ])("recognizes Azure DevOps host %s", (host) => {
+    expect(defaultForgeRegistry.matchHost(host)).toBe("azure-devops");
   });
 
   it("registers a third-party adapter without changing the registry implementation", () => {

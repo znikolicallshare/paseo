@@ -6,6 +6,7 @@ import {
   moveAddProjectActiveIndex,
   moveAddProjectSelection,
   openAddProjectFlow,
+  openAzureDevOpsLocationPage,
   openDirectorySearchPage,
   openGithubLocationPage,
   openNewDirectoryNamePage,
@@ -19,6 +20,7 @@ import {
   addProjectMethodEmptyText,
   buildAddProjectMethods,
   buildCloneLocationOptions,
+  buildManualAzureDevOpsRepositoryChoices,
   buildManualGithubRepositoryChoices,
 } from "./options";
 
@@ -29,6 +31,7 @@ const HOST: AddProjectHost = {
   canBrowse: true,
   canCloneGithubRepositories: true,
   canSearchGithubRepositories: true,
+  canUseForgeRepositories: true,
   canCreateDirectory: true,
 };
 
@@ -108,6 +111,29 @@ describe("Add Project navigation", () => {
       activeIndex: 2,
     });
   });
+
+  it("restores the Azure DevOps destination query and active parent", () => {
+    const repository = {
+      id: "repo-1",
+      name: "paseo",
+      projectPath: "Paseo/paseo",
+      cloneUrl: "https://dev.azure.com/example/Paseo/_git/paseo",
+      description: null,
+      updatedAt: null,
+    };
+    let state = openAddProjectFlow({ hosts: [HOST] });
+    state = openAzureDevOpsLocationPage(state, HOST.serverId, repository);
+    state = setAddProjectPageInput(state, "~/src");
+    state = setAddProjectActiveIndex(state, 1);
+    state = backAddProjectPage(state) ?? state;
+    state = openAzureDevOpsLocationPage(state, HOST.serverId, repository);
+
+    expect(currentAddProjectPage(state)).toMatchObject({
+      kind: "azure-devops-location",
+      query: "~/src",
+      activeIndex: 1,
+    });
+  });
 });
 
 describe("Add Project options", () => {
@@ -125,6 +151,7 @@ describe("Add Project options", () => {
         canBrowse: false,
         canCloneGithubRepositories: false,
         canSearchGithubRepositories: false,
+        canUseForgeRepositories: false,
         canCreateDirectory: false,
       }),
     ).toEqual([
@@ -148,6 +175,19 @@ describe("Add Project options", () => {
     ]);
   });
 
+  it("shows Azure DevOps only when neutral forge repositories are supported", () => {
+    expect(buildAddProjectMethods(HOST)).toContainEqual({
+      id: "azure-devops",
+      label: "Clone from Azure DevOps",
+      description: "Search repositories in your configured Azure DevOps project",
+    });
+    expect(
+      buildAddProjectMethods({ ...HOST, canUseForgeRepositories: false }).some(
+        (method) => method.id === "azure-devops",
+      ),
+    ).toBe(false);
+  });
+
   it("offers manual URL and protocol-specific owner/repo clone choices", () => {
     expect(buildManualGithubRepositoryChoices("git@github.com:getpaseo/paseo.git")).toEqual([
       expect.objectContaining({
@@ -161,6 +201,29 @@ describe("Add Project options", () => {
       expect.objectContaining({ cloneProtocol: "ssh", cloneUrl: "getpaseo/paseo" }),
     ]);
     expect(buildManualGithubRepositoryChoices("paseo")).toEqual([]);
+  });
+
+  it("offers complete Azure Repos URLs as manual clone choices", () => {
+    const cloneUrl = "https://dev.azure.com/allshareebv/eBankView/_git/orders-api";
+    expect(buildManualAzureDevOpsRepositoryChoices(cloneUrl)).toEqual([
+      {
+        id: `manual:${cloneUrl}`,
+        name: "orders-api",
+        projectPath: "allshareebv/eBankView/_git/orders-api",
+        cloneUrl,
+        description: "Clone this repository URL",
+        updatedAt: null,
+      },
+    ]);
+    expect(
+      buildManualAzureDevOpsRepositoryChoices(
+        "git@ssh.dev.azure.com:v3/allshareebv/eBankView/orders-api",
+      ),
+    ).toHaveLength(1);
+    expect(buildManualAzureDevOpsRepositoryChoices("getpaseo/paseo")).toEqual([]);
+    expect(buildManualAzureDevOpsRepositoryChoices("https://github.com/getpaseo/paseo")).toEqual(
+      [],
+    );
   });
 
   it("shows final clone paths while retaining parent paths as values", () => {

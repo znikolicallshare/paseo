@@ -4,6 +4,7 @@ import { createGitHubService, probeGitHubHost } from "./github-service.js";
 import type { ForgeService } from "./forge-service.js";
 import { createGiteaService, resolveGiteaFamilyForge } from "./gitea-service.js";
 import { createGitLabService, probeGitLabHost } from "./gitlab-service.js";
+import { createAzureDevOpsService, isAzureDevOpsHost } from "./azure-devops-service.js";
 
 export type ForgeServiceFactory = () => ForgeService;
 
@@ -149,6 +150,13 @@ export const defaultForgeRegistry = new ForgeRegistry([
       createService: createGitLabService,
       matchesHost: matchesCloudHost("gitlab"),
       probeHost: probeGitLabHost,
+    },
+  ],
+  [
+    "azure-devops",
+    {
+      createService: createAzureDevOpsService,
+      matchesHost: isAzureDevOpsHost,
     },
   ],
   [

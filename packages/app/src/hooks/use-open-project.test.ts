@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  cloneGitProjectDirectly,
   cloneGithubProjectDirectly,
   getOpenProjectFailureReason,
   openProjectDirectly,
@@ -32,6 +33,11 @@ interface RecordedClone {
   repo: string;
   targetDirectory: string;
   cloneProtocol?: "https" | "ssh";
+}
+
+interface RecordedGitClone {
+  cloneUrl: string;
+  targetDirectory: string;
 }
 
 function createFakeSession() {
@@ -221,6 +227,71 @@ describe("cloneGithubProjectDirectly", () => {
       errorCode: null,
       error: "Project registration failed",
     });
+    expect(session.projects).toEqual([]);
+    expect(session.hydrated).toEqual([]);
+  });
+});
+
+describe("cloneGitProjectDirectly", () => {
+  it("clones by URL and registers the project", async () => {
+    const session = createFakeSession();
+    const project = buildProjectPayload();
+    const clones: RecordedGitClone[] = [];
+
+    const result = await cloneGitProjectDirectly({
+      serverId: SERVER_ID,
+      cloneUrl: "https://dev.azure.com/example/Paseo/_git/project",
+      targetDirectory: "~/workspace",
+      isConnected: true,
+      client: {
+        cloneGitProject: async (input) => {
+          clones.push(input);
+          return {
+            requestId: "request-4",
+            cloneUrl: input.cloneUrl,
+            checkoutPath: PROJECT_PATH,
+            error: null,
+            project,
+          };
+        },
+      },
+      upsertProject: session.upsertProject,
+      setHasHydratedWorkspaces: session.setHasHydratedWorkspaces,
+    });
+
+    expect(result).toEqual({ ok: true, project });
+    expect(clones).toEqual([
+      {
+        cloneUrl: "https://dev.azure.com/example/Paseo/_git/project",
+        targetDirectory: "~/workspace",
+      },
+    ]);
+    expect(session.projects).toHaveLength(1);
+    expect(session.hydrated).toEqual([{ serverId: SERVER_ID, hydrated: true }]);
+  });
+
+  it("keeps the project unregistered when cloning fails", async () => {
+    const session = createFakeSession();
+
+    const result = await cloneGitProjectDirectly({
+      serverId: SERVER_ID,
+      cloneUrl: "https://dev.azure.com/example/Paseo/_git/missing",
+      targetDirectory: "~/workspace",
+      isConnected: true,
+      client: {
+        cloneGitProject: async (input) => ({
+          requestId: "request-5",
+          cloneUrl: input.cloneUrl,
+          checkoutPath: null,
+          error: "Repository not found",
+          project: null,
+        }),
+      },
+      upsertProject: session.upsertProject,
+      setHasHydratedWorkspaces: session.setHasHydratedWorkspaces,
+    });
+
+    expect(result).toEqual({ ok: false, errorCode: null, error: "Repository not found" });
     expect(session.projects).toEqual([]);
     expect(session.hydrated).toEqual([]);
   });

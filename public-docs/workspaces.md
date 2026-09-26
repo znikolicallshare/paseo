@@ -14,7 +14,7 @@ A workspace is the place where a task happens. It has a working directory and ca
 
 ## Projects contain workspaces
 
-The sidebar starts with projects. A project can be a git repository, a GitHub project, or any directory on a machine running the Paseo daemon.
+The sidebar starts with projects. A project can be a local directory or a Git repository cloned from GitHub or Azure DevOps on a machine running the Paseo daemon.
 
 Inside each project are workspaces. For example:
 
@@ -25,7 +25,28 @@ my-app
 └── redesign-settings
 ```
 
-Each workspace is a separate place to work. You can keep one for your main checkout, create another for a feature, or open a GitHub PR as another workspace.
+Each workspace is a separate place to work. You can keep one for your main checkout, create another for a feature, or open a pull request as another workspace.
+
+To search and clone Azure DevOps repositories, install Azure CLI with its `azure-devops`
+extension, sign in with `az login`, and configure the organization and project used by the picker:
+
+```bash
+az extension add --name azure-devops
+az login
+az devops configure --defaults organization=https://dev.azure.com/example
+```
+
+Without a project default, repository search covers every project visible in the organization. Add
+`project=Example` to the defaults to limit the picker to one project.
+
+Paseo uses a short-lived token from Azure CLI for HTTPS clones without storing it in Git config.
+Configure Git Credential Manager for later HTTPS fetch and push operations, or use SSH with an
+authorized key. You can paste a complete Azure Repos HTTPS or SSH URL into the picker without
+configuring CLI defaults.
+
+Azure DevOps pull requests support native status, policy summaries, reviews, comments, merge,
+squash, and auto-complete. Rebase completion and individual Azure Pipelines job-log drill-down are
+not available yet.
 
 Use the [CLI project commands](/docs/cli#projects) to register, list, rename, or delete projects.
 

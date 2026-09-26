@@ -81,6 +81,8 @@ import type {
   ProjectCreateDirectoryResponse,
   OpenProjectResponseMessage,
   WorkspaceGithubSearchRepositoriesResponse,
+  ProjectForgeSearchRepositoriesResponse,
+  ProjectGitCloneResponse,
   ProjectGithubCloneProtocol,
   ProjectGithubCloneResponse,
   ArchiveWorkspaceResponseMessage,
@@ -194,7 +196,7 @@ const perfNow: () => number =
     ? () => performance.now()
     : () => Date.now();
 
-const PROJECT_GITHUB_CLONE_TIMEOUT_MS = 5 * 60 * 1000;
+const PROJECT_GIT_CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 
 interface ImportAgentInputBase {
   cwd?: string;
@@ -907,6 +909,9 @@ type ProjectAddPayload = ProjectAddResponse["payload"];
 export type ProjectCreateDirectoryPayload = ProjectCreateDirectoryResponse["payload"];
 export type WorkspaceGithubSearchRepositoriesPayload =
   WorkspaceGithubSearchRepositoriesResponse["payload"];
+export type ProjectForgeSearchRepositoriesPayload =
+  ProjectForgeSearchRepositoriesResponse["payload"];
+export type ProjectGitClonePayload = ProjectGitCloneResponse["payload"];
 type ProjectGithubClonePayload = ProjectGithubCloneResponse["payload"];
 type ArchiveWorkspacePayload = ArchiveWorkspaceResponseMessage["payload"];
 type WorkspaceSetupStatusPayload = WorkspaceSetupStatusResponseMessage["payload"];
@@ -2647,6 +2652,38 @@ export class DaemonClient {
     );
   }
 
+  async searchForgeRepositories(
+    input: { forge: string; query: string; limit?: number },
+    requestId?: string,
+  ): Promise<ProjectForgeSearchRepositoriesPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"project.forge.search_repositories.response">(
+      {
+        requestId,
+        message: {
+          type: "project.forge.search_repositories.request",
+          forge: input.forge,
+          query: input.query,
+          limit: input.limit,
+        },
+      },
+    );
+  }
+
+  async cloneGitProject(
+    input: { cloneUrl: string; targetDirectory: string },
+    requestId?: string,
+  ): Promise<ProjectGitClonePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"project.git.clone.response">({
+      requestId,
+      message: {
+        type: "project.git.clone.request",
+        cloneUrl: input.cloneUrl,
+        targetDirectory: input.targetDirectory,
+      },
+      timeout: PROJECT_GIT_CLONE_TIMEOUT_MS,
+    });
+  }
+
   async cloneGithubProject(
     input: { repo: string; targetDirectory: string; cloneProtocol?: ProjectGithubCloneProtocol },
     requestId?: string,
@@ -2660,7 +2697,7 @@ export class DaemonClient {
     return this.sendNamespacedCorrelatedSessionRequest<"project.github.clone.response">({
       requestId,
       message,
-      timeout: PROJECT_GITHUB_CLONE_TIMEOUT_MS,
+      timeout: PROJECT_GIT_CLONE_TIMEOUT_MS,
     });
   }
 

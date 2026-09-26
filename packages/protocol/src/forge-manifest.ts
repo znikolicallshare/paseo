@@ -79,6 +79,17 @@ export const FORGE_DEFINITIONS: ForgeDefinition[] = [
     cloudHosts: ["gitlab.com"],
   },
   {
+    id: "azure-devops",
+    displayName: "Azure DevOps",
+    changeRequestAbbrev: "PR",
+    changeRequestNoun: "pull request",
+    changeRequestNumberPrefix: "#",
+    issueNumberPrefix: "#",
+    iconKind: "azure-devops",
+    signIn: { cli: "az", command: "az login" },
+    cloudHosts: ["dev.azure.com", "ssh.dev.azure.com", "vs-ssh.visualstudio.com"],
+  },
+  {
     id: "gitea",
     displayName: "Gitea",
     changeRequestAbbrev: "PR",

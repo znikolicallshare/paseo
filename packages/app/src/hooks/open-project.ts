@@ -77,6 +77,12 @@ export interface CloneGithubProjectDirectlyInput extends ProjectRegistrationCall
   client: Pick<DaemonClient, "cloneGithubProject"> | null;
 }
 
+export interface CloneGitProjectDirectlyInput extends ProjectRegistrationCallbacks {
+  cloneUrl: string;
+  targetDirectory: string;
+  client: Pick<DaemonClient, "cloneGitProject"> | null;
+}
+
 export async function openProjectDirectly(
   input: OpenProjectDirectlyInput,
 ): Promise<OpenProjectResult> {
@@ -135,6 +141,32 @@ export async function cloneGithubProjectDirectly(
     targetDirectory: trimmedTargetDirectory,
     ...(input.cloneProtocol ? { cloneProtocol: input.cloneProtocol } : {}),
   });
+  if (payload.error || !payload.project) {
+    return { ok: false, errorCode: null, error: payload.error };
+  }
+
+  const registered = registerProjectDescriptor({
+    serverId: normalizedServerId,
+    project: payload.project,
+    upsertProject: input.upsertProject,
+    setHasHydratedWorkspaces: input.setHasHydratedWorkspaces,
+  });
+  return registered
+    ? { ok: true, project: payload.project }
+    : { ok: false, errorCode: null, error: "Unable to register project" };
+}
+
+export async function cloneGitProjectDirectly(
+  input: CloneGitProjectDirectlyInput,
+): Promise<OpenProjectResult> {
+  const normalizedServerId = input.serverId.trim();
+  const cloneUrl = input.cloneUrl.trim();
+  const targetDirectory = input.targetDirectory.trim();
+  if (!normalizedServerId || !cloneUrl || !targetDirectory || !input.client || !input.isConnected) {
+    return { ok: false, errorCode: null, error: null };
+  }
+
+  const payload = await input.client.cloneGitProject({ cloneUrl, targetDirectory });
   if (payload.error || !payload.project) {
     return { ok: false, errorCode: null, error: payload.error };
   }

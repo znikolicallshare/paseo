@@ -14,6 +14,10 @@ describe("getForgeIconComponent", () => {
     expect(getForgeIconComponent("some-unknown-forge")).toBe(GitPullRequest);
     expect(getForgeIconComponent("")).toBe(GitPullRequest);
   });
+
+  it("uses the generic pull-request glyph for Azure DevOps", () => {
+    expect(getForgeIconComponent("azure-devops")).toBe(GitPullRequest);
+  });
 });
 
 describe("getForgeBrandColorMapping", () => {
@@ -45,5 +49,9 @@ describe("getForgeBrandColorMapping", () => {
 
   it("returns null for unknown icon kinds", () => {
     expect(getForgeBrandColorMapping("some-unknown-forge")).toBeNull();
+  });
+
+  it("uses neutral theme coloring for Azure DevOps", () => {
+    expect(getForgeBrandColorMapping("azure-devops")).toBeNull();
   });
 });

@@ -80,6 +80,106 @@ describe("project command-center protocol", () => {
     ).toBe(true);
   });
 
+  it("parses forge-neutral repository search RPCs", () => {
+    expect(
+      SessionInboundMessageSchema.parse({
+        type: "project.forge.search_repositories.request",
+        forge: "azure-devops",
+        query: "orders",
+        limit: 12,
+        requestId: "req-search-forges",
+      }),
+    ).toEqual({
+      type: "project.forge.search_repositories.request",
+      forge: "azure-devops",
+      query: "orders",
+      limit: 12,
+      requestId: "req-search-forges",
+    });
+
+    expect(
+      SessionOutboundMessageSchema.parse({
+        type: "project.forge.search_repositories.response",
+        payload: {
+          status: "success",
+          requestId: "req-search-forges",
+          repositories: [
+            {
+              forge: "azure-devops",
+              id: "repo-orders",
+              name: "orders-api",
+              projectPath: "eBankView/orders-api",
+              cloneUrl: "https://dev.azure.com/example/eBankView/_git/orders-api",
+              description: null,
+              updatedAt: null,
+            },
+          ],
+          available: true,
+          error: null,
+        },
+      }).payload.repositories,
+    ).toEqual([
+      {
+        forge: "azure-devops",
+        id: "repo-orders",
+        name: "orders-api",
+        projectPath: "eBankView/orders-api",
+        cloneUrl: "https://dev.azure.com/example/eBankView/_git/orders-api",
+        description: null,
+        updatedAt: null,
+      },
+    ]);
+
+    expect(
+      SessionOutboundMessageSchema.safeParse({
+        type: "project.forge.search_repositories.response",
+        payload: {
+          status: "unavailable",
+          requestId: "req-search-forges",
+          repositories: [],
+          reason: "future_forge_state",
+          available: false,
+          error: "Forge search is unavailable",
+        },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("parses a git clone request with a complete URL and its response", () => {
+    expect(
+      SessionInboundMessageSchema.parse({
+        type: "project.git.clone.request",
+        cloneUrl: "git@ssh.dev.azure.com:v3/example/eBankView/orders-api",
+        targetDirectory: "~/workspace",
+        requestId: "req-clone-git",
+      }),
+    ).toEqual({
+      type: "project.git.clone.request",
+      cloneUrl: "git@ssh.dev.azure.com:v3/example/eBankView/orders-api",
+      targetDirectory: "~/workspace",
+      requestId: "req-clone-git",
+    });
+
+    expect(
+      SessionOutboundMessageSchema.parse({
+        type: "project.git.clone.response",
+        payload: {
+          requestId: "req-clone-git",
+          cloneUrl: "git@ssh.dev.azure.com:v3/example/eBankView/orders-api",
+          checkoutPath: "/tmp/orders-api",
+          project: null,
+          error: null,
+        },
+      }).payload,
+    ).toEqual({
+      requestId: "req-clone-git",
+      cloneUrl: "git@ssh.dev.azure.com:v3/example/eBankView/orders-api",
+      checkoutPath: "/tmp/orders-api",
+      project: null,
+      error: null,
+    });
+  });
+
   it("parses atomic project directory creation request and response", () => {
     expect(
       SessionInboundMessageSchema.safeParse({
@@ -166,6 +266,7 @@ describe("project command-center protocol", () => {
 
     expect(parsed.features?.workspaceGithubRepositorySearch).toBeUndefined();
     expect(parsed.features?.projectGithubClone).toBeUndefined();
+    expect(parsed.features?.projectForgeRepositories).toBeUndefined();
     expect(parsed.features?.projectCreateDirectory).toBeUndefined();
   });
 

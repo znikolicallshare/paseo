@@ -407,6 +407,27 @@ export interface SearchResult {
   githubFeaturesEnabled?: boolean;
 }
 
+export interface ForgeRepositorySummary {
+  forge: string;
+  id: string;
+  name: string;
+  projectPath: string;
+  cloneUrl: string;
+  description: string | null;
+  updatedAt: string | null;
+}
+
+export interface SearchForgeRepositoriesOptions {
+  cwd: string;
+  query: string;
+  limit?: number;
+}
+
+export interface GetGitCloneAuthorizationHeaderOptions {
+  cwd: string;
+  cloneUrl: string;
+}
+
 export function createUnavailableSearchResult(
   authState: Exclude<ForgeAuthState, "authenticated">,
 ): SearchResult {
@@ -434,6 +455,12 @@ export interface CreatePullRequestOptions {
 }
 
 export interface ForgeService {
+  getGitCloneAuthorizationHeader?(
+    options: GetGitCloneAuthorizationHeaderOptions,
+  ): Promise<string | null>;
+  searchForgeRepositories?(
+    options: SearchForgeRepositoriesOptions,
+  ): Promise<ForgeRepositorySummary[]>;
   listPullRequests(options: ListPullRequestsOptions): Promise<PullRequestSummary[]>;
   listIssues(options: ListIssuesOptions): Promise<IssueSummary[]>;
   getPullRequest(options: GetPullRequestOptions): Promise<PullRequestSummary>;

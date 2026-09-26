@@ -1,4 +1,5 @@
 import type { ClientForgeLogicModule, ForgeSpecificEnvelope } from "@/git/client-forge-module";
+import { azureDevOpsForgeLogic } from "./azure-devops";
 import { codebergForgeLogic } from "./codeberg";
 import { forgejoForgeLogic } from "./forgejo";
 import { giteaForgeLogic } from "./gitea";
@@ -14,6 +15,7 @@ import { gitlabForgeLogic } from "./gitlab";
 export const CLIENT_FORGE_LOGIC_MODULES: readonly ClientForgeLogicModule[] = [
   githubForgeLogic,
   gitlabForgeLogic,
+  azureDevOpsForgeLogic,
   giteaForgeLogic,
   forgejoForgeLogic,
   codebergForgeLogic,

@@ -57,6 +57,7 @@ import {
   type GitHubService,
 } from "../services/github-service.js";
 import type { CheckDetails, ForgeService } from "../services/forge-service.js";
+import { defaultForgeRegistry } from "../services/forge-registry.js";
 import type { GitHubPullRequestStatusFacts } from "../services/github-facts.js";
 
 interface SessionHandlerInternals {
@@ -843,6 +844,117 @@ describe("session authorization permissions", () => {
 });
 
 describe("project command-center RPCs", () => {
+  test("searches repositories through the requested forge adapter", async () => {
+    const messages: SessionOutboundMessage[] = [];
+    const searchForgeRepositories = vi.fn().mockResolvedValue([
+      {
+        forge: "azure-devops",
+        id: "repo-id",
+        name: "orders-api",
+        projectPath: "eBankView/orders-api",
+        cloneUrl: "https://dev.azure.com/allshareebv/eBankView/_git/orders-api",
+        description: null,
+        updatedAt: null,
+      },
+    ]);
+    const forge = asGitHubService({ searchForgeRepositories });
+    const unregister = defaultForgeRegistry.register("test-forge", {
+      createService: () => forge,
+    });
+    const session = createSessionForTest({ messages });
+
+    try {
+      await session.handleMessage({
+        type: "project.forge.search_repositories.request",
+        forge: "test-forge",
+        query: "orders",
+        limit: 10,
+        requestId: "req-forge-repositories",
+      });
+    } finally {
+      unregister();
+    }
+
+    expect(searchForgeRepositories).toHaveBeenCalledWith({
+      cwd: expect.any(String),
+      query: "orders",
+      limit: 10,
+    });
+    expect(messages).toEqual([
+      {
+        type: "project.forge.search_repositories.response",
+        payload: {
+          status: "success",
+          requestId: "req-forge-repositories",
+          repositories: [
+            {
+              forge: "azure-devops",
+              id: "repo-id",
+              name: "orders-api",
+              projectPath: "eBankView/orders-api",
+              cloneUrl: "https://dev.azure.com/allshareebv/eBankView/_git/orders-api",
+              description: null,
+              updatedAt: null,
+            },
+          ],
+          available: true,
+          error: null,
+        },
+      },
+    ]);
+  });
+
+  test("reports an unsupported forge repository source without invoking a CLI", async () => {
+    const messages: SessionOutboundMessage[] = [];
+    const session = createSessionForTest({ messages });
+
+    await session.handleMessage({
+      type: "project.forge.search_repositories.request",
+      forge: "unknown-forge",
+      query: "paseo",
+      requestId: "req-forge-repositories",
+    });
+
+    expect(messages).toEqual([
+      {
+        type: "project.forge.search_repositories.response",
+        payload: {
+          status: "unavailable",
+          requestId: "req-forge-repositories",
+          repositories: [],
+          reason: "unsupported_forge",
+          available: false,
+          error: "Repository search is unavailable for forge unknown-forge",
+        },
+      },
+    ]);
+  });
+
+  test("rejects a generic clone request without a complete remote URL", async () => {
+    const messages: SessionOutboundMessage[] = [];
+    const session = createSessionForTest({ messages });
+
+    await session.handleMessage({
+      type: "project.git.clone.request",
+      cloneUrl: "allshareebv/orders-api",
+      targetDirectory: "/tmp/projects",
+      requestId: "req-git-clone",
+    });
+
+    expect(messages).toEqual([
+      {
+        type: "project.git.clone.response",
+        payload: {
+          requestId: "req-git-clone",
+          cloneUrl: "allshareebv/orders-api",
+          checkoutPath: null,
+          project: null,
+          error: "Repository must use a complete git remote URL",
+        },
+      },
+    ]);
+  });
+
   test("returns normalized repositories from the host GitHub service", async () => {
     const messages: SessionOutboundMessage[] = [];
     const searchRepositories = vi.fn().mockResolvedValue([

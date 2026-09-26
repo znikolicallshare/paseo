@@ -2588,6 +2588,31 @@ export const WorkspaceGithubSearchRepositoriesRequestSchema = z.object({
   requestId: z.string(),
 });
 
+export const ForgeRepositorySchema = z.object({
+  forge: z.string().min(1),
+  id: z.string().min(1),
+  name: z.string().min(1),
+  projectPath: z.string().min(MIN_REPOSITORY_PATH_LENGTH),
+  cloneUrl: z.string().min(1),
+  description: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+});
+
+export const ProjectForgeSearchRepositoriesRequestSchema = z.object({
+  type: z.literal("project.forge.search_repositories.request"),
+  forge: z.string().min(1),
+  query: z.string(),
+  limit: z.number().int().min(1).max(50).optional(),
+  requestId: z.string(),
+});
+
+export const ProjectGitCloneRequestSchema = z.object({
+  type: z.literal("project.git.clone.request"),
+  cloneUrl: z.string().min(1),
+  targetDirectory: z.string().min(1),
+  requestId: z.string(),
+});
+
 export const ProjectGithubCloneProtocolSchema = z.enum(["https", "ssh"]);
 
 export const ProjectGithubCloneRequestSchema = z.object({
@@ -3310,6 +3335,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ProjectAddRequestSchema,
   ProjectCreateDirectoryRequestSchema,
   WorkspaceGithubSearchRepositoriesRequestSchema,
+  ProjectForgeSearchRepositoriesRequestSchema,
+  ProjectGitCloneRequestSchema,
   ProjectGithubCloneRequestSchema,
   ArchiveWorkspaceRequestSchema,
   WorkspaceCreateRequestSchema,
@@ -3663,6 +3690,8 @@ export const ServerInfoStatusPayloadSchema = z
         projectGithubClone: z.boolean().optional(),
         // COMPAT(workspaceGithubRepositorySearch): added in v0.1.108, remove gate after 2027-01-15.
         workspaceGithubRepositorySearch: z.boolean().optional(),
+        // COMPAT(projectForgeRepositories): added after v0.9.2, remove gate after 2027-03-26.
+        projectForgeRepositories: z.boolean().optional(),
         // COMPAT(projectCreateDirectory): added in v0.1.108, remove gate after 2027-01-15.
         projectCreateDirectory: z.boolean().optional(),
         // COMPAT(projectList): added in v0.2.4, drop the gate when floor >= v0.2.4.
@@ -4474,6 +4503,52 @@ export const WorkspaceGithubSearchRepositoriesResponseSchema = z.object({
       error: z.string(),
     }),
   ]),
+});
+
+export const ProjectForgeSearchRepositoriesResponseSchema = z.object({
+  type: z.literal("project.forge.search_repositories.response"),
+  payload: z.discriminatedUnion("status", [
+    z.object({
+      status: z.literal("success"),
+      requestId: z.string(),
+      repositories: z.array(ForgeRepositorySchema),
+      available: z.literal(true),
+      error: z.null(),
+    }),
+    z.object({
+      status: z.literal("unavailable"),
+      requestId: z.string(),
+      repositories: z.array(ForgeRepositorySchema),
+      reason: z.string(),
+      available: z.literal(false),
+      error: z.string(),
+    }),
+    z.object({
+      status: z.literal("unauthenticated"),
+      requestId: z.string(),
+      repositories: z.array(ForgeRepositorySchema),
+      available: z.literal(false),
+      error: z.string(),
+    }),
+    z.object({
+      status: z.literal("error"),
+      requestId: z.string(),
+      repositories: z.array(ForgeRepositorySchema),
+      available: z.literal(true),
+      error: z.string(),
+    }),
+  ]),
+});
+
+export const ProjectGitCloneResponseSchema = z.object({
+  type: z.literal("project.git.clone.response"),
+  payload: z.object({
+    requestId: z.string(),
+    cloneUrl: z.string().min(1),
+    checkoutPath: z.string().nullable(),
+    project: WorkspaceProjectDescriptorPayloadSchema.nullable(),
+    error: z.string().nullable(),
+  }),
 });
 
 export const ProjectGithubCloneResponseSchema = z.object({
@@ -6834,6 +6909,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ProjectCreateDirectoryResponseSchema,
   OpenProjectResponseMessageSchema,
   WorkspaceGithubSearchRepositoriesResponseSchema,
+  ProjectForgeSearchRepositoriesResponseSchema,
+  ProjectGitCloneResponseSchema,
   ProjectGithubCloneResponseSchema,
   StartWorkspaceScriptResponseMessageSchema,
   WorkspaceScriptListResponseMessageSchema,
@@ -7043,6 +7120,11 @@ export type WorkspaceGithubSearchRepositoriesResponse = z.infer<
   typeof WorkspaceGithubSearchRepositoriesResponseSchema
 >;
 export type GithubRepository = z.infer<typeof GithubRepositorySchema>;
+export type ForgeRepository = z.infer<typeof ForgeRepositorySchema>;
+export type ProjectForgeSearchRepositoriesResponse = z.infer<
+  typeof ProjectForgeSearchRepositoriesResponseSchema
+>;
+export type ProjectGitCloneResponse = z.infer<typeof ProjectGitCloneResponseSchema>;
 export type ProjectGithubCloneResponse = z.infer<typeof ProjectGithubCloneResponseSchema>;
 export type StartWorkspaceScriptResponseMessage = z.infer<
   typeof StartWorkspaceScriptResponseMessageSchema
@@ -7367,6 +7449,10 @@ export type ProjectCreateDirectoryErrorCode = z.infer<typeof ProjectCreateDirect
 export type WorkspaceGithubSearchRepositoriesRequest = z.infer<
   typeof WorkspaceGithubSearchRepositoriesRequestSchema
 >;
+export type ProjectForgeSearchRepositoriesRequest = z.infer<
+  typeof ProjectForgeSearchRepositoriesRequestSchema
+>;
+export type ProjectGitCloneRequest = z.infer<typeof ProjectGitCloneRequestSchema>;
 export type ProjectGithubCloneRequest = z.infer<typeof ProjectGithubCloneRequestSchema>;
 export type ProjectGithubCloneProtocol = z.infer<typeof ProjectGithubCloneProtocolSchema>;
 export type ArchiveWorkspaceRequest = z.infer<typeof ArchiveWorkspaceRequestSchema>;

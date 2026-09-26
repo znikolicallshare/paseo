@@ -5,6 +5,7 @@ export interface AddProjectHost {
   canBrowse: boolean;
   canCloneGithubRepositories: boolean;
   canSearchGithubRepositories: boolean;
+  canUseForgeRepositories: boolean;
   canCreateDirectory: boolean;
 }
 
@@ -13,6 +14,15 @@ export interface GithubRepositoryChoice {
   nameWithOwner: string;
   cloneUrl: string;
   cloneProtocol?: "https" | "ssh";
+  description: string | null;
+  updatedAt: string | null;
+}
+
+export interface ForgeRepositoryChoice {
+  id: string;
+  name: string;
+  projectPath: string;
+  cloneUrl: string;
   description: string | null;
   updatedAt: string | null;
 }
@@ -31,10 +41,17 @@ export type AddProjectPage =
   | ({ kind: "method"; hostId: string; isSubmitting: boolean } & PageState)
   | ({ kind: "directory-search"; hostId: string; isSubmitting: boolean } & SearchPageState)
   | ({ kind: "github-search"; hostId: string } & SearchPageState)
+  | ({ kind: "azure-devops-search"; hostId: string } & SearchPageState)
   | ({
       kind: "github-location";
       hostId: string;
       repository: GithubRepositoryChoice;
+      isSubmitting: boolean;
+    } & SearchPageState)
+  | ({
+      kind: "azure-devops-location";
+      hostId: string;
+      repository: ForgeRepositoryChoice;
       isSubmitting: boolean;
     } & SearchPageState)
   | ({ kind: "new-directory-parent"; hostId: string } & SearchPageState)
@@ -52,7 +69,7 @@ export interface AddProjectFlowState {
   hosts: AddProjectHost[];
   pages: AddProjectPage[];
   newDirectoryNameDrafts: Record<string, string>;
-  githubLocationDrafts: Record<string, { query: string; activeIndex: number }>;
+  cloneLocationDrafts: Record<string, { query: string; activeIndex: number }>;
 }
 
 export interface OpenAddProjectFlowInput {
@@ -81,7 +98,7 @@ export function openAddProjectFlow(input: OpenAddProjectFlowInput): AddProjectFl
     hosts: input.hosts,
     pages: initialHost ? [methodPage(initialHost.serverId)] : [searchPage("host")],
     newDirectoryNameDrafts: {},
-    githubLocationDrafts: {},
+    cloneLocationDrafts: {},
   };
 }
 
@@ -164,14 +181,39 @@ export function openGithubSearchPage(
   return pushAddProjectPage(state, { ...searchPage("github-search"), hostId });
 }
 
+export function openAzureDevOpsSearchPage(
+  state: AddProjectFlowState,
+  hostId: string,
+): AddProjectFlowState {
+  return pushAddProjectPage(state, { ...searchPage("azure-devops-search"), hostId });
+}
+
 export function openGithubLocationPage(
   state: AddProjectFlowState,
   hostId: string,
   repository: GithubRepositoryChoice,
 ): AddProjectFlowState {
-  const draft = state.githubLocationDrafts[githubLocationDraftKey(hostId, repository.id)];
+  const draft = state.cloneLocationDrafts[cloneLocationDraftKey(hostId, "github", repository.id)];
   return pushAddProjectPage(state, {
     kind: "github-location",
+    query: draft?.query ?? "",
+    activeIndex: draft?.activeIndex ?? 0,
+    error: null,
+    hostId,
+    repository,
+    isSubmitting: false,
+  });
+}
+
+export function openAzureDevOpsLocationPage(
+  state: AddProjectFlowState,
+  hostId: string,
+  repository: ForgeRepositoryChoice,
+): AddProjectFlowState {
+  const draft =
+    state.cloneLocationDrafts[cloneLocationDraftKey(hostId, "azure-devops", repository.id)];
+  return pushAddProjectPage(state, {
+    kind: "azure-devops-location",
     query: draft?.query ?? "",
     activeIndex: draft?.activeIndex ?? 0,
     error: null,
@@ -217,12 +259,13 @@ export function setAddProjectPageInput(
     if (current.kind === "method") return current;
     return { ...current, query: value, activeIndex: 0, error: null };
   });
-  if (page.kind !== "github-location") return updated;
-  const draftKey = githubLocationDraftKey(page.hostId, page.repository.id);
+  if (page.kind !== "github-location" && page.kind !== "azure-devops-location") return updated;
+  const forge = page.kind === "github-location" ? "github" : "azure-devops";
+  const draftKey = cloneLocationDraftKey(page.hostId, forge, page.repository.id);
   return {
     ...updated,
-    githubLocationDrafts: {
-      ...updated.githubLocationDrafts,
+    cloneLocationDrafts: {
+      ...updated.cloneLocationDrafts,
       [draftKey]: { query: value, activeIndex: 0 },
     },
   };
@@ -249,8 +292,8 @@ function newDirectoryDraftKey(hostId: string, parentPath: string): string {
   return `${hostId}\u0000${parentPath}`;
 }
 
-function githubLocationDraftKey(hostId: string, repositoryId: string): string {
-  return `${hostId}\u0000${repositoryId}`;
+function cloneLocationDraftKey(hostId: string, forge: string, repositoryId: string): string {
+  return `${hostId}\u0000${forge}\u0000${repositoryId}`;
 }
 
 export function setAddProjectActiveIndex(
@@ -259,12 +302,13 @@ export function setAddProjectActiveIndex(
 ): AddProjectFlowState {
   const page = currentAddProjectPage(state);
   const updated = updateCurrentAddProjectPage(state, (current) => ({ ...current, activeIndex }));
-  if (page.kind !== "github-location") return updated;
-  const draftKey = githubLocationDraftKey(page.hostId, page.repository.id);
+  if (page.kind !== "github-location" && page.kind !== "azure-devops-location") return updated;
+  const forge = page.kind === "github-location" ? "github" : "azure-devops";
+  const draftKey = cloneLocationDraftKey(page.hostId, forge, page.repository.id);
   return {
     ...updated,
-    githubLocationDrafts: {
-      ...updated.githubLocationDrafts,
+    cloneLocationDrafts: {
+      ...updated.cloneLocationDrafts,
       [draftKey]: { query: page.query, activeIndex },
     },
   };

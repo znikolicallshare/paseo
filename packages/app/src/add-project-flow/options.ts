@@ -4,9 +4,14 @@ import {
   parseGitRemoteLocation,
 } from "@getpaseo/protocol/git-remote";
 import { shortenPath } from "@/utils/shorten-path";
-import type { AddProjectHost, GithubRepositoryChoice } from "./model";
+import type { AddProjectHost, ForgeRepositoryChoice, GithubRepositoryChoice } from "./model";
 
-export type AddProjectMethodId = "directory-search" | "browse" | "github" | "new-directory";
+export type AddProjectMethodId =
+  | "directory-search"
+  | "browse"
+  | "github"
+  | "azure-devops"
+  | "new-directory";
 
 export interface AddProjectMethodOption {
   id: AddProjectMethodId;
@@ -54,6 +59,13 @@ export function buildAddProjectMethods(host: AddProjectHost): AddProjectMethodOp
     description: githubMethodDescription(host),
     disabled: !host.canCloneGithubRepositories,
   });
+  if (host.canUseForgeRepositories) {
+    options.push({
+      id: "azure-devops",
+      label: "Clone from Azure DevOps",
+      description: "Search repositories in your configured Azure DevOps project",
+    });
+  }
   options.push({
     id: "new-directory",
     label: "New directory",
@@ -117,6 +129,31 @@ export function buildManualGithubRepositoryChoices(query: string): GithubReposit
     description: `Clone owner/repo via ${cloneProtocol.toUpperCase()}`,
     updatedAt: null,
   }));
+}
+
+export function buildManualAzureDevOpsRepositoryChoices(query: string): ForgeRepositoryChoice[] {
+  const cloneUrl = query.trim();
+  const location = parseGitRemoteLocation(cloneUrl);
+  if (!location || !isAzureDevOpsHost(location.host)) return [];
+  return [
+    {
+      id: `manual:${cloneUrl}`,
+      name: pathBaseName(location.path),
+      projectPath: location.path,
+      cloneUrl,
+      description: "Clone this repository URL",
+      updatedAt: null,
+    },
+  ];
+}
+
+function isAzureDevOpsHost(host: string): boolean {
+  return (
+    host === "dev.azure.com" ||
+    host === "ssh.dev.azure.com" ||
+    host === "vs-ssh.visualstudio.com" ||
+    host.endsWith(".visualstudio.com")
+  );
 }
 
 export function parentDirectory(path: string): string | null {

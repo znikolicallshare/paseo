@@ -218,6 +218,17 @@ are stale, run `npm run build:server`.
   (`manual`) from blocking jobs (`manual` plus `action_required`). A failed
   allowed-failure job carries the `warning` trait, and `canceling` remains active
   until GitLab reports a terminal status.
+- Azure DevOps Services uses `az` with the `azure-devops` extension. Repository
+  discovery reads the CLI's configured organization and searches every visible
+  project when no project default is set. Run
+  `az devops configure --defaults organization=<url>` before using **Clone from
+  Azure DevOps**; add `project=<name>` to limit discovery to one project. HTTPS
+  clones use a short-lived Microsoft Entra
+  token from `az account get-access-token`; the token is passed through Git's
+  environment-backed configuration and is not persisted. Later fetch and push
+  operations still need Git Credential Manager, or use SSH with an authorized key.
+- Azure DevOps Server is not inferred as Azure DevOps. Add authenticated host
+  probing before sending Azure credentials to remote-derived self-hosted URLs.
 - GitHub PR polling owns one account-wide GraphQL budget. Coordinate retained
   targets per host, batch their reads, and stop until GitHub's reset time when
   the reserve is exhausted. Never add a per-target GitHub request to the poll

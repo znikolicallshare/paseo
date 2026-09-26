@@ -3506,6 +3506,128 @@ test("searches GitHub repositories through the dotted RPC", async () => {
   });
 });
 
+test("searches forge repositories through the dotted RPC", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const searchPromise = client.searchForgeRepositories(
+    { forge: "azure-devops", query: "orders", limit: 10 },
+    "req-forge-repositories",
+  );
+  expect(parseSentFrame(mock.sent[0])).toEqual({
+    type: "project.forge.search_repositories.request",
+    forge: "azure-devops",
+    query: "orders",
+    limit: 10,
+    requestId: "req-forge-repositories",
+  });
+
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "project.forge.search_repositories.response",
+      payload: {
+        status: "success",
+        requestId: "req-forge-repositories",
+        repositories: [
+          {
+            forge: "azure-devops",
+            id: "repo-orders",
+            name: "orders-api",
+            projectPath: "eBankView/orders-api",
+            cloneUrl: "https://dev.azure.com/example/eBankView/_git/orders-api",
+            description: null,
+            updatedAt: null,
+          },
+        ],
+        available: true,
+        error: null,
+      },
+    }),
+  );
+
+  await expect(searchPromise).resolves.toEqual({
+    status: "success",
+    requestId: "req-forge-repositories",
+    repositories: [
+      {
+        forge: "azure-devops",
+        id: "repo-orders",
+        name: "orders-api",
+        projectPath: "eBankView/orders-api",
+        cloneUrl: "https://dev.azure.com/example/eBankView/_git/orders-api",
+        description: null,
+        updatedAt: null,
+      },
+    ],
+    available: true,
+    error: null,
+  });
+});
+
+test("clones a complete git URL through the dotted RPC", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const clonePromise = client.cloneGitProject(
+    {
+      cloneUrl: "git@ssh.dev.azure.com:v3/example/eBankView/orders-api",
+      targetDirectory: "~/workspace",
+    },
+    "req-clone-git",
+  );
+  expect(parseSentFrame(mock.sent[0])).toEqual({
+    type: "project.git.clone.request",
+    cloneUrl: "git@ssh.dev.azure.com:v3/example/eBankView/orders-api",
+    targetDirectory: "~/workspace",
+    requestId: "req-clone-git",
+  });
+
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "project.git.clone.response",
+      payload: {
+        requestId: "req-clone-git",
+        cloneUrl: "git@ssh.dev.azure.com:v3/example/eBankView/orders-api",
+        checkoutPath: "/tmp/orders-api",
+        project: null,
+        error: null,
+      },
+    }),
+  );
+
+  await expect(clonePromise).resolves.toEqual({
+    requestId: "req-clone-git",
+    cloneUrl: "git@ssh.dev.azure.com:v3/example/eBankView/orders-api",
+    checkoutPath: "/tmp/orders-api",
+    project: null,
+    error: null,
+  });
+});
+
 test("creates and registers a project directory through the dotted RPC", async () => {
   const logger = createMockLogger();
   const mock = createMockTransport();

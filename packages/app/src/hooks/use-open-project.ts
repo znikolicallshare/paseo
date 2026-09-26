@@ -3,6 +3,7 @@ import { useCallback } from "react";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { useSessionStore } from "@/stores/session-store";
 import {
+  cloneGitProjectDirectly,
   cloneGithubProjectDirectly,
   openProjectDirectly,
   type OpenProjectResult,
@@ -53,6 +54,38 @@ export function useOpenProject(
       normalizedServerId,
       setHasHydratedWorkspaces,
     ],
+  );
+}
+
+export function useCloneGitProject(
+  serverId: string | null,
+): (cloneUrl: string, targetDirectory: string) => Promise<OpenProjectResult> {
+  const normalizedServerId = serverId?.trim() ?? "";
+  const client = useHostRuntimeClient(normalizedServerId);
+  const isConnected = useHostRuntimeIsConnected(normalizedServerId);
+  const upsertProject = useCallback(
+    (
+      targetServerId: string,
+      project: Parameters<ReturnType<typeof getHostRuntimeStore>["acceptProjectSnapshot"]>[1],
+    ) => {
+      getHostRuntimeStore().acceptProjectSnapshot(targetServerId, project);
+    },
+    [],
+  );
+  const setHasHydratedWorkspaces = useSessionStore((state) => state.setHasHydratedWorkspaces);
+
+  return useCallback(
+    async (cloneUrl: string, targetDirectory: string) =>
+      cloneGitProjectDirectly({
+        serverId: normalizedServerId,
+        cloneUrl,
+        targetDirectory,
+        isConnected,
+        client,
+        upsertProject,
+        setHasHydratedWorkspaces,
+      }),
+    [client, isConnected, normalizedServerId, setHasHydratedWorkspaces, upsertProject],
   );
 }
 

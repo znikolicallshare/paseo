@@ -2379,6 +2379,19 @@ export function createGitHubService(options: CreateGitHubServiceOptions = {}): G
       return parseRepositorySearch(stdout, cloneProtocol);
     },
 
+    async searchForgeRepositories(input) {
+      const repositories = await this.searchRepositories(input);
+      return repositories.map((repository) => ({
+        forge: "github",
+        id: repository.id,
+        name: repository.name,
+        projectPath: repository.nameWithOwner,
+        cloneUrl: repository.cloneUrl,
+        description: repository.description,
+        updatedAt: repository.updatedAt,
+      }));
+    },
+
     async searchIssuesAndPrs(input) {
       if (input.force && !input.reason) {
         throw new Error("ForgeService forced read requires a reason");

@@ -233,6 +233,12 @@ import {
 } from "../services/github-service.js";
 import type { ForgeService } from "../services/forge-service.js";
 import {
+  ForgeAuthenticationError,
+  ForgeCliMissingError,
+  ForgeCommandError,
+} from "../services/forge-cli-command.js";
+import { createForgeService, defaultForgeRegistry } from "../services/forge-registry.js";
+import {
   resolveWorkspaceRootAgent,
   summarizeFetchWorkspacesEntries,
   workspaceIdsOnCheckout,
@@ -2904,8 +2910,12 @@ export class Session {
         return this.handleProjectCreateDirectoryRequest(msg);
       case "workspace.github.search_repositories.request":
         return this.handleWorkspaceGithubSearchRepositoriesRequest(msg);
+      case "project.forge.search_repositories.request":
+        return this.handleProjectForgeSearchRepositoriesRequest(msg);
       case "project.github.clone.request":
         return this.handleProjectGithubCloneRequest(msg);
+      case "project.git.clone.request":
+        return this.handleProjectGitCloneRequest(msg);
       case "archive_workspace_request":
         return this.handleArchiveWorkspaceRequest(msg);
       case "project.remove.request":
@@ -7006,6 +7016,92 @@ export class Session {
     }
   }
 
+  private async handleProjectForgeSearchRepositoriesRequest(
+    request: Extract<SessionInboundMessage, { type: "project.forge.search_repositories.request" }>,
+  ): Promise<void> {
+    const service = createForgeService(request.forge);
+    const searchRepositories = service?.searchForgeRepositories;
+    if (!service || !searchRepositories) {
+      this.emit({
+        type: "project.forge.search_repositories.response",
+        payload: {
+          status: "unavailable",
+          requestId: request.requestId,
+          repositories: [],
+          reason: "unsupported_forge",
+          available: false,
+          error: `Repository search is unavailable for forge ${request.forge}`,
+        },
+      });
+      return;
+    }
+
+    try {
+      const repositories = await searchRepositories.call(service, {
+        cwd: homedir(),
+        query: request.query,
+        limit: request.limit,
+      });
+      this.emit({
+        type: "project.forge.search_repositories.response",
+        payload: {
+          status: "success",
+          requestId: request.requestId,
+          repositories,
+          available: true,
+          error: null,
+        },
+      });
+    } catch (error) {
+      const missing = error instanceof ForgeCliMissingError;
+      const unauthenticated = error instanceof ForgeAuthenticationError;
+      const commandError = error instanceof ForgeCommandError ? error.stderr.trim() : "";
+      const message =
+        commandError || (error instanceof Error ? error.message : "Repository search failed");
+      this.sessionLogger.warn(
+        { err: error, forge: request.forge },
+        "Forge repository search failed",
+      );
+      if (missing) {
+        this.emit({
+          type: "project.forge.search_repositories.response",
+          payload: {
+            status: "unavailable",
+            requestId: request.requestId,
+            repositories: [],
+            reason: "cli_missing",
+            available: false,
+            error: message,
+          },
+        });
+        return;
+      }
+      if (unauthenticated) {
+        this.emit({
+          type: "project.forge.search_repositories.response",
+          payload: {
+            status: "unauthenticated",
+            requestId: request.requestId,
+            repositories: [],
+            available: false,
+            error: message,
+          },
+        });
+        return;
+      }
+      this.emit({
+        type: "project.forge.search_repositories.response",
+        payload: {
+          status: "error",
+          requestId: request.requestId,
+          repositories: [],
+          available: true,
+          error: message,
+        },
+      });
+    }
+  }
+
   private async handleProjectGithubCloneRequest(
     request: Extract<SessionInboundMessage, { type: "project.github.clone.request" }>,
   ): Promise<void> {
@@ -7017,43 +7113,8 @@ export class Session {
         cloneProtocol: request.cloneProtocol,
       });
       normalizedRepo = repo.displayName;
-      const targetParent = resolve(expandTilde(request.targetDirectory.trim()));
-      checkoutPath = resolve(targetParent, repo.name);
-      if (!this.isPathWithinRoot(targetParent, checkoutPath)) {
-        throw new Error("Resolved checkout path must stay inside the target directory");
-      }
-
-      await mkdir(targetParent, { recursive: true });
-      try {
-        await lstat(checkoutPath);
-        throw new Error(`Checkout path already exists: ${checkoutPath}`);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-          throw error;
-        }
-      }
-
-      const cloneStagingPath = await mkdtemp(resolve(targetParent, ".paseo-clone-"));
-      try {
-        await runGitCommand(["clone", repo.cloneUrl, cloneStagingPath], {
-          cwd: targetParent,
-          timeout: 5 * 60 * 1000,
-          maxOutputBytes: 1024 * 1024,
-          logger: this.sessionLogger,
-        });
-        await rename(cloneStagingPath, checkoutPath);
-      } catch (error) {
-        await rm(cloneStagingPath, { recursive: true, force: true }).catch((cleanupError) => {
-          this.sessionLogger.warn(
-            { err: cleanupError, cloneStagingPath },
-            "Failed to clean up partial GitHub clone",
-          );
-        });
-        throw error;
-      }
-
-      const project =
-        await this.workspaceProvisioning.findOrCreateProjectForDirectory(checkoutPath);
+      const cloned = await this.cloneProject(repo, request.targetDirectory);
+      checkoutPath = cloned.checkoutPath;
 
       this.emit({
         type: "project.github.clone.response",
@@ -7061,7 +7122,7 @@ export class Session {
           requestId: request.requestId,
           repo: repo.displayName,
           checkoutPath,
-          project: await this.buildProjectDescriptor(project),
+          project: cloned.project,
           error: null,
         },
       });
@@ -7082,6 +7143,98 @@ export class Session {
         },
       });
     }
+  }
+
+  private async handleProjectGitCloneRequest(
+    request: Extract<SessionInboundMessage, { type: "project.git.clone.request" }>,
+  ): Promise<void> {
+    let checkoutPath: string | null = null;
+    try {
+      const repository = normalizeGitCloneRepository(request.cloneUrl);
+      const cloned = await this.cloneProject(repository, request.targetDirectory);
+      checkoutPath = cloned.checkoutPath;
+      this.emit({
+        type: "project.git.clone.response",
+        payload: {
+          requestId: request.requestId,
+          cloneUrl: request.cloneUrl,
+          checkoutPath,
+          project: cloned.project,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.sessionLogger.error(
+        { err: error, targetDirectory: request.targetDirectory },
+        "Failed to clone Git project",
+      );
+      this.emit({
+        type: "project.git.clone.response",
+        payload: {
+          requestId: request.requestId,
+          cloneUrl: request.cloneUrl,
+          checkoutPath,
+          project: null,
+          error: error instanceof Error ? error.message : "Failed to clone repository",
+        },
+      });
+    }
+  }
+
+  private async cloneProject(
+    repository: CloneRepositoryInput,
+    targetDirectory: string,
+  ): Promise<{ checkoutPath: string; project: WorkspaceProjectDescriptorPayload }> {
+    const targetParent = resolve(expandTilde(targetDirectory.trim()));
+    const checkoutPath = resolve(targetParent, repository.name);
+    if (!this.isPathWithinRoot(targetParent, checkoutPath)) {
+      throw new Error("Resolved checkout path must stay inside the target directory");
+    }
+
+    await mkdir(targetParent, { recursive: true });
+    try {
+      await lstat(checkoutPath);
+      throw new Error(`Checkout path already exists: ${checkoutPath}`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+
+    const cloneStagingPath = await mkdtemp(resolve(targetParent, ".paseo-clone-"));
+    try {
+      const authorizationHeader = await resolveGitCloneAuthorizationHeader(
+        repository.cloneUrl,
+        targetParent,
+      );
+      const cloneArgs = authorizationHeader
+        ? [
+            "--config-env=http.extraheader=PASEO_GIT_AUTH_HEADER",
+            "clone",
+            repository.cloneUrl,
+            cloneStagingPath,
+          ]
+        : ["clone", repository.cloneUrl, cloneStagingPath];
+      await runGitCommand(cloneArgs, {
+        cwd: targetParent,
+        ...(authorizationHeader
+          ? { envOverlay: { PASEO_GIT_AUTH_HEADER: authorizationHeader } }
+          : {}),
+        timeout: 5 * 60 * 1000,
+        maxOutputBytes: 1024 * 1024,
+        logger: this.sessionLogger,
+      });
+      await rename(cloneStagingPath, checkoutPath);
+    } catch (error) {
+      await rm(cloneStagingPath, { recursive: true, force: true }).catch((cleanupError) => {
+        this.sessionLogger.warn(
+          { err: cleanupError, cloneStagingPath },
+          "Failed to clean up partial clone",
+        );
+      });
+      throw error;
+    }
+
+    const project = await this.workspaceProvisioning.findOrCreateProjectForDirectory(checkoutPath);
+    return { checkoutPath, project: await this.buildProjectDescriptor(project) };
   }
 
   // Named accessor: the workspace descriptor builder and the git-watch test both read a workspace's
@@ -8463,6 +8616,30 @@ interface CloneRepositoryInput {
   cloneUrl: string;
 }
 
+async function resolveGitCloneAuthorizationHeader(
+  cloneUrl: string,
+  cwd: string,
+): Promise<string | null> {
+  const remote = parseGitRemoteLocation(cloneUrl);
+  if (!remote) return null;
+  const forgeId = defaultForgeRegistry.matchHost(remote.host);
+  const forge = forgeId ? defaultForgeRegistry.create(forgeId) : null;
+  return forge?.getGitCloneAuthorizationHeader?.({ cwd, cloneUrl }) ?? null;
+}
+
+function normalizeGitCloneRepository(cloneUrl: string): CloneRepositoryInput {
+  const trimmed = cloneUrl.trim();
+  const remote = parseGitRemoteLocation(trimmed);
+  if (!remote) {
+    throw new Error("Repository must use a complete git remote URL");
+  }
+  const name = basename(remote.path);
+  if (!name || name === "." || name === ".." || name.includes("\0")) {
+    throw new Error("Repository URL does not contain a valid repository name");
+  }
+  return { name, displayName: remote.path, cloneUrl: trimmed };
+}
+
 function normalizeCloneRepository(input: {
   repo: string;
   cloneProtocol?: "https" | "ssh";
@@ -8474,12 +8651,7 @@ function normalizeCloneRepository(input: {
 
   const remote = parseGitRemoteLocation(trimmed);
   if (remote) {
-    const segments = remote.path.split("/").filter(Boolean);
-    const name = segments.at(-1);
-    if (!name || !isValidGitHubRepoSegment(name)) {
-      throw new Error("Repository name contains invalid characters");
-    }
-    return { name, displayName: remote.path, cloneUrl: trimmed };
+    return normalizeGitCloneRepository(trimmed);
   }
 
   const [owner, rawName, ...extra] = trimmed.split("/");

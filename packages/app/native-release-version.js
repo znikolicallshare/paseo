@@ -1,4 +1,4 @@
-const versionPattern = /^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$/;
+const versionPattern = /^(\d+)\.(\d+)\.(\d+)(?:-(beta|devops)\.(\d+))?$/;
 const stableIosBuildSlot = 999;
 const FDROID_ABI_VERSION_CODE_SUFFIXES = {
   "armeabi-v7a": 1,
@@ -13,17 +13,20 @@ function getNativeReleaseVersion(version) {
     throw new Error(`Cannot derive native release version from unsupported version: ${version}`);
   }
 
-  const [, majorText, minorText, patchText, betaText] = match;
+  const [, majorText, minorText, patchText, prereleaseTag, prereleaseText] = match;
   const major = Number(majorText);
   const minor = Number(minorText);
   const patch = Number(patchText);
-  const betaNumber = betaText === undefined ? null : Number(betaText);
+  const prereleaseNumber = prereleaseText === undefined ? null : Number(prereleaseText);
 
   if (minor > 999 || patch > 999) {
     throw new Error(`Cannot derive collision-free native version from: ${version}`);
   }
-  if (betaNumber !== null && (betaNumber < 1 || betaNumber >= stableIosBuildSlot)) {
-    throw new Error(`iOS beta number must be between 1 and 998: ${version}`);
+  if (
+    prereleaseNumber !== null &&
+    (prereleaseNumber < 1 || prereleaseNumber >= stableIosBuildSlot)
+  ) {
+    throw new Error(`iOS ${prereleaseTag} number must be between 1 and 998: ${version}`);
   }
 
   const versionCode = major * 1_000_000 + minor * 1_000 + patch;
@@ -35,7 +38,7 @@ function getNativeReleaseVersion(version) {
     throw new Error(`Derived Android versionCode is out of range: ${versionCode}`);
   }
 
-  const iosBuildSlot = betaNumber ?? stableIosBuildSlot;
+  const iosBuildSlot = prereleaseNumber ?? stableIosBuildSlot;
   const iosBuildNumber = versionCode * 1_000 + iosBuildSlot;
   if (!Number.isSafeInteger(iosBuildNumber)) {
     throw new Error(`Derived iOS buildNumber is out of range: ${iosBuildNumber}`);

@@ -15,13 +15,16 @@ describe("native release version", () => {
     });
   });
 
-  it("gives each beta a unique iOS build slot under the stable app version", () => {
-    expect(getNativeReleaseVersion("0.2.6-beta.2")).toEqual({
-      appVersion: "0.2.6",
-      androidVersionCode: 2006,
-      iosBuildNumber: "2006002",
-    });
-  });
+  it.each(["0.2.6-beta.2", "0.2.6-devops.2"])(
+    "gives %s a unique iOS build slot under the stable app version",
+    (version) => {
+      expect(getNativeReleaseVersion(version)).toEqual({
+        appVersion: "0.2.6",
+        androidVersionCode: 2006,
+        iosBuildNumber: "2006002",
+      });
+    },
+  );
 
   it("rejects beta numbers that consume the stable iOS build slot", () => {
     expect(() => getNativeReleaseVersion("0.2.6-beta.999")).toThrow(

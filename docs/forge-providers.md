@@ -223,10 +223,11 @@ are stale, run `npm run build:server`.
   project when no project default is set. Run
   `az devops configure --defaults organization=<url>` before using **Clone from
   Azure DevOps**; add `project=<name>` to limit discovery to one project. HTTPS
-  clones use a short-lived Microsoft Entra
-  token from `az account get-access-token`; the token is passed through Git's
-  environment-backed configuration and is not persisted. Later fetch and push
-  operations still need Git Credential Manager, or use SSH with an authorized key.
+  clones use a short-lived Microsoft Entra token from
+  `az account get-access-token`. For HTTPS repositories, Paseo installs a
+  repository-local credential helper that requests a fresh token from the Azure CLI
+  for later fetches and pushes; tokens are never persisted. SSH repositories use the
+  configured key instead.
 - Azure DevOps Server is not inferred as Azure DevOps. Add authenticated host
   probing before sending Azure credentials to remote-derived self-hosted URLs.
 - GitHub PR polling owns one account-wide GraphQL budget. Coordinate retained

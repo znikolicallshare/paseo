@@ -423,6 +423,11 @@ export interface SearchForgeRepositoriesOptions {
   limit?: number;
 }
 
+export interface GitAuthenticationOptions {
+  cwd: string;
+  remoteUrl: string;
+}
+
 export interface GetGitCloneAuthorizationHeaderOptions {
   cwd: string;
   cloneUrl: string;
@@ -455,6 +460,7 @@ export interface CreatePullRequestOptions {
 }
 
 export interface ForgeService {
+  configureGitAuthentication?(options: GitAuthenticationOptions): Promise<void>;
   getGitCloneAuthorizationHeader?(
     options: GetGitCloneAuthorizationHeaderOptions,
   ): Promise<string | null>;

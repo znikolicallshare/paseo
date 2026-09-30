@@ -233,6 +233,7 @@ import {
 } from "../services/github-service.js";
 import type { ForgeService } from "../services/forge-service.js";
 import {
+  defaultResolveRemoteUrl,
   ForgeAuthenticationError,
   ForgeCliMissingError,
   ForgeCommandError,
@@ -6771,6 +6772,7 @@ export class Session {
         workspacesBefore.set(workspaceRecord.workspaceId, workspaceRecord);
       }
       const workspace = await this.workspaceProvisioning.findOrCreateWorkspaceForDirectory(cwd);
+      await configureGitAuthentication(workspace.cwd);
       const project = await this.projectRegistry.get(workspace.projectId);
       await this.syncWorkspaceGitObserverForWorkspace(workspace);
       const descriptor = await this.describeWorkspaceRecord(workspace);
@@ -6856,6 +6858,7 @@ export class Session {
         projectsBefore.set(project.projectId, project);
       }
       const project = await this.workspaceProvisioning.findOrCreateProjectForDirectory(cwd);
+      await configureGitAuthentication(cwd);
       this.sessionLogger.info(
         {
           requestedCwd,
@@ -7222,6 +7225,7 @@ export class Session {
         maxOutputBytes: 1024 * 1024,
         logger: this.sessionLogger,
       });
+      await configureGitAuthentication(cloneStagingPath, repository.cloneUrl);
       await rename(cloneStagingPath, checkoutPath);
     } catch (error) {
       await rm(cloneStagingPath, { recursive: true, force: true }).catch((cleanupError) => {
@@ -8614,6 +8618,16 @@ interface CloneRepositoryInput {
   name: string;
   displayName: string;
   cloneUrl: string;
+}
+
+async function configureGitAuthentication(cwd: string, knownRemoteUrl?: string): Promise<void> {
+  const remoteUrl = knownRemoteUrl ?? (await defaultResolveRemoteUrl(cwd));
+  if (!remoteUrl) return;
+  const remote = parseGitRemoteLocation(remoteUrl);
+  if (!remote) return;
+  const forgeId = defaultForgeRegistry.matchHost(remote.host);
+  const forge = forgeId ? defaultForgeRegistry.create(forgeId) : null;
+  await forge?.configureGitAuthentication?.({ cwd, remoteUrl });
 }
 
 async function resolveGitCloneAuthorizationHeader(

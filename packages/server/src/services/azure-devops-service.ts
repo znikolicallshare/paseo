@@ -2,7 +2,7 @@ import { z } from "zod";
 import { parseGitRemoteLocation } from "@getpaseo/protocol/git-remote";
 import { CHECK_TRAIT_WARNING } from "@getpaseo/protocol/check-traits";
 import { findExecutable } from "../executable-resolution/executable-resolution.js";
-import { runGitCommand } from "../utils/run-git-command.js";
+import { runGitCommand, type RunGitCommand } from "../utils/run-git-command.js";
 import {
   createCachedCliPathResolver,
   createForgeCliRunner,
@@ -27,6 +27,7 @@ import {
   type EnablePullRequestAutoMergeOptions,
   type ForgeReadOptions,
   type ForgeRepositorySummary,
+  type GitAuthenticationOptions,
   type GetGitCloneAuthorizationHeaderOptions,
   type ForgeService,
   type GetCheckDetailsOptions,
@@ -65,6 +66,7 @@ const DEFAULT_LIST_LIMIT = 100;
 const PULL_REQUEST_PAGE_SIZE = 100;
 const PULL_REQUEST_PAGE_LIMIT = 10;
 const AZURE_DEVOPS_RESOURCE_ID = "499b84ac-1321-427f-aa17-267ca6975798";
+const AZURE_DEVOPS_GIT_CREDENTIAL_HELPER = String.raw`!f() { [ "$1" = get ] || exit 0; token="$(az account get-access-token --resource ${AZURE_DEVOPS_RESOURCE_ID} --query accessToken --output tsv --only-show-errors)" || { echo 'Azure DevOps authentication expired; run az login.' >&2; exit 1; }; [ -n "$token" ] || exit 1; printf 'username=AzureDevOps\npassword=%s\n\n' "$token"; }; f`;
 const AZURE_DEVOPS_HOSTS = new Set([
   "dev.azure.com",
   "ssh.dev.azure.com",
@@ -98,6 +100,7 @@ export interface CreateAzureDevOpsServiceOptions {
   resolveAzPath?: () => Promise<string | null>;
   resolveRemoteUrl?: (cwd: string) => Promise<string | null>;
   resolveContributorName?: (cwd: string) => Promise<string | null>;
+  gitRunner?: RunGitCommand;
 }
 
 export class AzureCliMissingError extends ForgeCliMissingError {
@@ -713,6 +716,7 @@ export function createAzureDevOpsService(
   const resolveAz = createCachedCliPathResolver(options.resolveAzPath ?? resolveAzPath);
   const resolveRemoteUrl = options.resolveRemoteUrl ?? defaultResolveRemoteUrl;
   const resolveContributorName = options.resolveContributorName ?? resolveGitContributorName;
+  const gitRunner = options.gitRunner ?? runGitCommand;
 
   async function run(args: string[], runOptions: AzureCommandRunnerOptions): Promise<string> {
     const azPath = await resolveAz();
@@ -878,6 +882,22 @@ export function createAzureDevOpsService(
   }
 
   return {
+    async configureGitAuthentication(input: GitAuthenticationOptions): Promise<void> {
+      const location = parseGitRemoteLocation(input.remoteUrl);
+      if (!location || location.transport !== "https" || !isAzureDevOpsHost(location.host)) return;
+      if (!(await resolveAz())) return;
+      await gitRunner(
+        [
+          "config",
+          "--local",
+          "--replace-all",
+          `credential.https://${location.host}.helper`,
+          AZURE_DEVOPS_GIT_CREDENTIAL_HELPER,
+        ],
+        { cwd: input.cwd },
+      );
+    },
+
     async getGitCloneAuthorizationHeader(
       input: GetGitCloneAuthorizationHeaderOptions,
     ): Promise<string | null> {

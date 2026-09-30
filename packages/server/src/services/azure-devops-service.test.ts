@@ -77,6 +77,50 @@ describe("Azure DevOps service", () => {
     ).resolves.toBeNull();
   });
 
+  it("configures HTTPS repositories to refresh Git credentials through Azure CLI", async () => {
+    const calls: Array<{ args: string[]; cwd: string }> = [];
+    const service = createAzureDevOpsService({
+      resolveAzPath: async () => "/usr/bin/az",
+      gitRunner: async (args, options) => {
+        calls.push({ args, cwd: options.cwd });
+        return { stdout: "", stderr: "", truncated: false, exitCode: 0, signal: null };
+      },
+    });
+
+    await service.configureGitAuthentication?.({
+      cwd: "/workspace",
+      remoteUrl: "https://allshareebv.visualstudio.com/playground/_git/allshare-harness",
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.cwd).toBe("/workspace");
+    expect(calls[0]?.args.slice(0, 4)).toEqual([
+      "config",
+      "--local",
+      "--replace-all",
+      "credential.https://allshareebv.visualstudio.com.helper",
+    ]);
+    expect(calls[0]?.args[4]).toContain("az account get-access-token");
+    expect(calls[0]?.args[4]).toContain("username=AzureDevOps");
+  });
+
+  it("does not configure a credential helper for SSH repositories", async () => {
+    const calls: string[][] = [];
+    const service = createAzureDevOpsService({
+      gitRunner: async (args) => {
+        calls.push(args);
+        return { stdout: "", stderr: "", truncated: false, exitCode: 0, signal: null };
+      },
+    });
+
+    await service.configureGitAuthentication?.({
+      cwd: "/workspace",
+      remoteUrl: "git@ssh.dev.azure.com:v3/allshareebv/playground/allshare-harness",
+    });
+
+    expect(calls).toEqual([]);
+  });
+
   it.each([
     [
       "https://dev.azure.com/allshareebv/eBankView/_git/orders-api",

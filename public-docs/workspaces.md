@@ -39,10 +39,10 @@ az devops configure --defaults organization=https://dev.azure.com/example
 Without a project default, repository search covers every project visible in the organization. Add
 `project=Example` to the defaults to limit the picker to one project.
 
-Paseo uses a short-lived token from Azure CLI for HTTPS clones without storing it in Git config.
-Configure Git Credential Manager for later HTTPS fetch and push operations, or use SSH with an
-authorized key. You can paste a complete Azure Repos HTTPS or SSH URL into the picker without
-configuring CLI defaults.
+For Azure Repos HTTPS URLs, Paseo configures the repository to request short-lived tokens from
+your Azure CLI session. Clones, fetches, and pushes do not store tokens in Git config. Run `az login`
+again if the CLI session expires. SSH URLs continue to use your authorized SSH key. You can paste a
+complete Azure Repos HTTPS or SSH URL into the picker without configuring CLI defaults.
 
 Azure DevOps pull requests support native status, policy summaries, reviews, comments, merge,
 squash, and auto-complete. Rebase completion and individual Azure Pipelines job-log drill-down are
